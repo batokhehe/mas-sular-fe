@@ -269,7 +269,7 @@ export const promos: Promo[] = [
 export const sampleOrders: Order[] = [
   {
     id: '1',
-    orderNumber: 'BN-20240315-001',
+    orderNumber: 'BMS-20240315-001',
     items: [
       {
         product: products[0],
@@ -300,7 +300,7 @@ export const sampleOrders: Order[] = [
   },
   {
     id: '2',
-    orderNumber: 'BN-20240316-002',
+    orderNumber: 'BMS-20240316-002',
     items: [
       {
         product: products[2],
@@ -327,7 +327,7 @@ export const sampleOrders: Order[] = [
   },
   {
     id: '3',
-    orderNumber: 'BN-20240317-003',
+    orderNumber: 'BMS-20240317-003',
     items: [
       {
         product: products[5],

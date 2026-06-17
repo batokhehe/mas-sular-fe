@@ -44,7 +44,7 @@ export function Navbar() {
             whileHover={{ scale: 1.05 }}
             className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-lg"
           >
-            BN
+            BMS
           </motion.div>
           <span className="hidden font-bold text-lg sm:inline-block">Bakso Mas Sular</span>
         </Link>

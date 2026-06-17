@@ -222,7 +222,7 @@ export default function OnboardingPage() {
         <div className="container flex items-center justify-center h-14">
           <div className="flex items-center gap-2">
             <div className="h-8 w-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center text-sm font-bold">
-              BN
+              BMS
             </div>
             <span className="font-bold">Bakso Mas Sular</span>
           </div>
