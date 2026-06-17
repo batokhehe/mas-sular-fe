@@ -1,4 +1,4 @@
-// Mock data for Baso Nusantara
+// Mock data for Bakso Mas Sular
 
 export interface Product {
   id: string;

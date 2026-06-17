@@ -224,7 +224,7 @@ export default function OnboardingPage() {
             <div className="h-8 w-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center text-sm font-bold">
               BN
             </div>
-            <span className="font-bold">Baso Nusantara</span>
+            <span className="font-bold">Bakso Mas Sular</span>
           </div>
         </div>
       </header>

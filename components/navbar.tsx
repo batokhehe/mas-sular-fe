@@ -46,7 +46,7 @@ export function Navbar() {
           >
             BN
           </motion.div>
-          <span className="hidden font-bold text-lg sm:inline-block">Baso Nusantara</span>
+          <span className="hidden font-bold text-lg sm:inline-block">Bakso Mas Sular</span>
         </Link>
 
         {/* Desktop Navigation */}

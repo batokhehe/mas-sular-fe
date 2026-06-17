@@ -9,7 +9,7 @@ export function StorefrontHeader() {
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
         <Link href="/" className="text-lg font-bold tracking-tight">
-          Baso Nusantara
+          Bakso Mas Sular
         </Link>
         <div className="hidden md:block">
           <StorefrontNavigation />
