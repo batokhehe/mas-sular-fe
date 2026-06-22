@@ -37,6 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginWithGoogle = useCallback(
     async (idToken: string) => {
+      console.log('AUTH_FIX_VERSION_20260622')
       const res = await authApi.googleLogin(idToken)
       // Tokens are nested under `res.tokens` — reading `res.accessToken` wrote
       // `undefined` into the cookies, leaving the session unauthenticated.
