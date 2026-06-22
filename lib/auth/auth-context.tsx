@@ -38,7 +38,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loginWithGoogle = useCallback(
     async (idToken: string) => {
       const res = await authApi.googleLogin(idToken)
-      setCustomerTokens(res.accessToken, res.refreshToken)
+      // Tokens are nested under `res.tokens` — reading `res.accessToken` wrote
+      // `undefined` into the cookies, leaving the session unauthenticated.
+      setCustomerTokens(res.tokens.accessToken, res.tokens.refreshToken)
+      // Seed the cache from the login response so `meQuery` updates immediately.
+      // `invalidateQueries` alone does NOT refetch `me` here: it is disabled
+      // (enabled: hasCustomerSession() was false at render and writing a cookie
+      // does not re-render the provider), so without this the UI would only
+      // reflect the login after a reload.
+      qc.setQueryData(qk.me, res.user)
       await qc.invalidateQueries({ queryKey: qk.me })
     },
     [qc],
