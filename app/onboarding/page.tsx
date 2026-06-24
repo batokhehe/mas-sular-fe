@@ -1,8 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import Script from 'next/script'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -12,9 +13,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { userApi } from '@/lib/api'
-import { useAddressStore, useAuthStore } from '@/lib/store'
 import { toast } from 'sonner'
+import { useAuth } from '@/lib/auth/auth-context'
+import { useCreateAddress } from '@/lib/query/hooks/use-addresses'
+import { qk } from '@/lib/query/keys'
+import type { User } from '@/lib/types/models'
 
 const addressSchema = z.object({
   recipientName: z.string().min(2, 'Nama penerima minimal 2 karakter'),
@@ -36,9 +39,19 @@ declare global {
   }
 }
 
-export default function OnboardingPage() {
+// Same internal-path guard used by the login page (avoids open redirects).
+function safeRedirect(value: string | null): string {
+  return value && value.startsWith('/') && !value.startsWith('//') ? value : '/'
+}
+
+function OnboardingInner() {
   const router = useRouter()
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const params = useSearchParams()
+  const redirect = params.get('redirect')
+  const qc = useQueryClient()
+  const { user } = useAuth()
+  const createAddress = useCreateAddress()
+
   const [mapLocation, setMapLocation] = useState<LatLng | null>(null)
   const [isMapReady, setIsMapReady] = useState(false)
   const [isGeocoding, setIsGeocoding] = useState(false)
@@ -47,16 +60,6 @@ export default function OnboardingPage() {
   const mapInstanceRef = useRef<any>(null)
   const markerRef = useRef<any>(null)
   const geocoderRef = useRef<any>(null)
-  
-  const addAddress = useAddressStore((state) => state.addAddress)
-  const completeOnboarding = useAuthStore((state) => state.completeOnboarding)
-  const { isAuthenticated, user } = useAuthStore()
-
-  useEffect(() => {
-    if (!isAuthenticated) {
-      router.push('/login')
-    }
-  }, [isAuthenticated, router])
 
   const {
     register,
@@ -164,55 +167,37 @@ export default function OnboardingPage() {
         setIsLocating(false)
         toast.success('Lokasi berhasil didapatkan')
       },
-      (error) => {
+      () => {
         setIsLocating(false)
         toast.error('Gagal mendapatkan lokasi. Pastikan GPS aktif.')
       },
-      { enableHighAccuracy: true }
+      { enableHighAccuracy: true },
     )
   }
 
   const onSubmit = async (data: AddressFormData) => {
-    setIsSubmitting(true)
-
     try {
-      const address = await userApi.createAddress({
+      // Real address creation (POST /users/me/addresses). The hook invalidates
+      // qk.me + qk.addresses; the backend sets isOnboarded=true on this call.
+      await createAddress.mutateAsync({
         label: 'Rumah',
         recipientName: data.recipientName,
         phone: data.phone,
         fullAddress: data.fullAddress,
         notes: data.notes,
-        latitude: mapLocation?.lat || DEFAULT_LOCATION.lat,
-        longitude: mapLocation?.lng || DEFAULT_LOCATION.lng,
+        latitude: mapLocation?.lat ?? DEFAULT_LOCATION.lat,
+        longitude: mapLocation?.lng ?? DEFAULT_LOCATION.lng,
         isDefault: true,
       })
 
-      addAddress({
-        id: address.id,
-        label: address.label,
-        recipientName: address.recipientName,
-        phone: address.phone,
-        fullAddress: address.fullAddress,
-        notes: address.notes,
-        latitude: Number(address.latitude),
-        longitude: Number(address.longitude),
-        isDefault: address.isDefault,
-      })
+      // Reflect isOnboarded=true synchronously BEFORE navigating so no stale
+      // qk.me read can bounce the user back into onboarding.
+      qc.setQueryData<User>(qk.me, (current) => (current ? { ...current, isOnboarded: true } : current))
 
-      completeOnboarding()
-      toast.success('Alamat berhasil disimpan!')
-      router.push('/')
-    } catch (error) {
-      console.error('Failed to save address', error)
-      toast.error('Gagal menyimpan alamat. Silakan coba lagi.')
-    } finally {
-      setIsSubmitting(false)
+      router.replace(safeRedirect(redirect))
+    } catch {
+      // Failure is surfaced by the global mutation-cache error toast.
     }
-  }
-
-  // Prevent server-side router actions by redirecting on the client
-  if (!isAuthenticated) {
-    return null
   }
 
   return (
@@ -230,10 +215,7 @@ export default function OnboardingPage() {
       </header>
 
       <main className="container max-w-lg py-8 px-4">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
           {/* Progress */}
           <div className="flex items-center justify-center gap-2 mb-8">
             <div className="flex items-center gap-2">
@@ -327,11 +309,7 @@ export default function OnboardingPage() {
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="recipientName">Nama Penerima</Label>
-              <Input
-                id="recipientName"
-                placeholder="Masukkan nama penerima"
-                {...register('recipientName')}
-              />
+              <Input id="recipientName" placeholder="Masukkan nama penerima" {...register('recipientName')} />
               {errors.recipientName && (
                 <p className="text-sm text-destructive">{errors.recipientName.message}</p>
               )}
@@ -339,15 +317,8 @@ export default function OnboardingPage() {
 
             <div className="space-y-2">
               <Label htmlFor="phone">Nomor Telepon</Label>
-              <Input
-                id="phone"
-                type="tel"
-                placeholder="08xxxxxxxxxx"
-                {...register('phone')}
-              />
-              {errors.phone && (
-                <p className="text-sm text-destructive">{errors.phone.message}</p>
-              )}
+              <Input id="phone" type="tel" placeholder="08xxxxxxxxxx" {...register('phone')} />
+              {errors.phone && <p className="text-sm text-destructive">{errors.phone.message}</p>}
             </div>
 
             <div className="space-y-2">
@@ -358,27 +329,16 @@ export default function OnboardingPage() {
                 rows={3}
                 {...register('fullAddress')}
               />
-              {errors.fullAddress && (
-                <p className="text-sm text-destructive">{errors.fullAddress.message}</p>
-              )}
+              {errors.fullAddress && <p className="text-sm text-destructive">{errors.fullAddress.message}</p>}
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="notes">Catatan Alamat (Opsional)</Label>
-              <Input
-                id="notes"
-                placeholder="Contoh: Pagar warna biru, dekat masjid"
-                {...register('notes')}
-              />
+              <Input id="notes" placeholder="Contoh: Pagar warna biru, dekat masjid" {...register('notes')} />
             </div>
 
-            <Button
-              type="submit"
-              className="w-full rounded-full"
-              size="lg"
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
+            <Button type="submit" className="w-full rounded-full" size="lg" disabled={createAddress.isPending}>
+              {createAddress.isPending ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Menyimpan...
@@ -391,5 +351,19 @@ export default function OnboardingPage() {
         </motion.div>
       </main>
     </div>
+  )
+}
+
+export default function OnboardingPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center">
+          <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        </div>
+      }
+    >
+      <OnboardingInner />
+    </Suspense>
   )
 }

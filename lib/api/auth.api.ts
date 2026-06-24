@@ -21,6 +21,10 @@ export const authApi = {
   googleLogin: (idToken: string) => api.post<GoogleLoginResponse>('/auth/google', { idToken }),
   refresh: (refreshToken: string) => api.post<AuthTokens>('/auth/refresh', { refreshToken }),
   me: () => api.get<User>('/users/me', 'customer'),
+  // Phase 13B.5: terminate the server session. Cookie-only (audience 'customer' →
+  // no Authorization header; credentials:'include' sends ms_refresh). Backend
+  // revokes the refresh token and clears ms_access/ms_refresh/ms_session.
+  logout: () => api.post<{ success: boolean }>('/auth/logout', undefined, 'customer'),
 
   adminLogin: (email: string, password: string) =>
     api.post<AdminLoginResponse>('/admin/auth/login', { email, password }),

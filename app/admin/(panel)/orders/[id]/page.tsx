@@ -16,7 +16,7 @@ import {
   paymentStatusVariant,
   shipmentStatusVariant,
 } from '@/lib/utils/status'
-import { confirmStatusChange, showLoading, showSuccess, showError } from '@/lib/utils/admin-alert'
+import { confirmStatusChange, confirmCreate, confirmUpdate, showLoading, showSuccess, showError } from '@/lib/utils/admin-alert'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -212,6 +212,7 @@ function ShipmentSection({
   const [tracking, setTracking] = useState(shipment?.trackingNumber ?? '')
 
   async function handleCreate() {
+    if (!(await confirmCreate())) return
     showLoading()
     try {
       await create.mutateAsync({
@@ -228,6 +229,7 @@ function ShipmentSection({
   }
 
   async function handleSaveTracking() {
+    if (!(await confirmUpdate())) return
     showLoading()
     try {
       await update.mutateAsync({ trackingNumber: tracking || undefined })

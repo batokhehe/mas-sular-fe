@@ -98,6 +98,121 @@ export async function confirmStatusChange(
   return res.isConfirmed
 }
 
+export async function confirmCreate(): Promise<boolean> {
+  const res = await swal.fire({
+    icon: 'question',
+    title: 'Create data?',
+    showCancelButton: true,
+    confirmButtonText: 'Create',
+    cancelButtonText: 'Cancel',
+    confirmButtonColor: COLORS.primary,
+    cancelButtonColor: COLORS.cancel,
+    reverseButtons: true,
+  })
+  return res.isConfirmed
+}
+
+export async function confirmUpdate(): Promise<boolean> {
+  const res = await swal.fire({
+    icon: 'question',
+    title: 'Save changes?',
+    showCancelButton: true,
+    confirmButtonText: 'Save',
+    cancelButtonText: 'Cancel',
+    confirmButtonColor: COLORS.primary,
+    cancelButtonColor: COLORS.cancel,
+    reverseButtons: true,
+  })
+  return res.isConfirmed
+}
+
+export async function confirmCancel(): Promise<boolean> {
+  const res = await swal.fire({
+    icon: 'warning',
+    title: 'Cancel this item?',
+    showCancelButton: true,
+    confirmButtonText: 'Cancel',
+    // The confirm button is "Cancel"; label the dismiss button "No" to avoid two "Cancel"s.
+    cancelButtonText: 'No',
+    confirmButtonColor: COLORS.danger,
+    cancelButtonColor: COLORS.cancel,
+    reverseButtons: true,
+    focusCancel: true,
+  })
+  return res.isConfirmed
+}
+
+/** Generic approve confirm (domain pages may use a richer action-specific confirmer). */
+export async function confirmApprove(): Promise<boolean> {
+  const res = await swal.fire({
+    icon: 'question',
+    title: 'Approve this item?',
+    showCancelButton: true,
+    confirmButtonText: 'Approve',
+    cancelButtonText: 'Cancel',
+    confirmButtonColor: COLORS.primary,
+    cancelButtonColor: COLORS.cancel,
+    reverseButtons: true,
+  })
+  return res.isConfirmed
+}
+
+export async function confirmReject(): Promise<boolean> {
+  const res = await swal.fire({
+    icon: 'warning',
+    title: 'Reject this item?',
+    showCancelButton: true,
+    confirmButtonText: 'Reject',
+    cancelButtonText: 'Cancel',
+    confirmButtonColor: COLORS.danger,
+    cancelButtonColor: COLORS.cancel,
+    reverseButtons: true,
+  })
+  return res.isConfirmed
+}
+
+export async function confirmActivate(): Promise<boolean> {
+  const res = await swal.fire({
+    icon: 'question',
+    title: 'Activate this item?',
+    showCancelButton: true,
+    confirmButtonText: 'Activate',
+    cancelButtonText: 'Cancel',
+    confirmButtonColor: COLORS.primary,
+    cancelButtonColor: COLORS.cancel,
+    reverseButtons: true,
+  })
+  return res.isConfirmed
+}
+
+export async function confirmDeactivate(): Promise<boolean> {
+  const res = await swal.fire({
+    icon: 'warning',
+    title: 'Deactivate this item?',
+    showCancelButton: true,
+    confirmButtonText: 'Deactivate',
+    cancelButtonText: 'Cancel',
+    confirmButtonColor: COLORS.danger,
+    cancelButtonColor: COLORS.cancel,
+    reverseButtons: true,
+  })
+  return res.isConfirmed
+}
+
+// ---------------- Canonical success messages ----------------
+
+/** Centralized success copy for admin mutations (use with showSuccess). */
+export const ADMIN_SUCCESS_MESSAGES = {
+  create: 'Data created successfully',
+  update: 'Changes saved successfully',
+  delete: 'Data deleted successfully',
+  approve: 'Item approved successfully',
+  reject: 'Item rejected successfully',
+  cancel: 'Item cancelled successfully',
+  activate: 'Item activated successfully',
+  deactivate: 'Item deactivated successfully',
+} as const
+
 // ---------------- Feedback ----------------
 
 export function showSuccess(title: string, text: string): Promise<unknown> {

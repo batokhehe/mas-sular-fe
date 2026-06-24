@@ -6,11 +6,10 @@ import { authApi } from '@/lib/api/auth.api'
 import { qk } from '@/lib/query/keys'
 import type { User } from '@/lib/types/models'
 import {
-  setCustomerTokens,
-  clearCustomerTokens,
   setAdminToken,
   clearAdminToken,
   hasCustomerSession,
+  removeLegacyCustomerCookies,
 } from './tokens'
 
 interface AuthContextValue {
@@ -37,14 +36,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginWithGoogle = useCallback(
     async (idToken: string) => {
-      console.log('AUTH_FIX_VERSION_20260622')
       const res = await authApi.googleLogin(idToken)
-      // Tokens are nested under `res.tokens` — reading `res.accessToken` wrote
-      // `undefined` into the cookies, leaving the session unauthenticated.
-      setCustomerTokens(res.tokens.accessToken, res.tokens.refreshToken)
+      // Phase 13B.3: the backend sets the customer session via httpOnly cookies
+      // (ms_access/ms_refresh) and the ms_session marker on this response — the
+      // client no longer stores tokens. Remove any legacy host-only token cookies
+      // to avoid duplicate same-named cookies.
+      removeLegacyCustomerCookies()
       // Seed the cache from the login response so `meQuery` updates immediately.
       // `invalidateQueries` alone does NOT refetch `me` here: it is disabled
-      // (enabled: hasCustomerSession() was false at render and writing a cookie
+      // (enabled: hasCustomerSession() was false at render and the marker cookie
       // does not re-render the provider), so without this the UI would only
       // reflect the login after a reload.
       qc.setQueryData(qk.me, res.user)
@@ -53,9 +53,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [qc],
   )
 
-  const logout = useCallback(() => {
-    clearCustomerTokens()
+  const logout = useCallback(async () => {
+    // Phase 13B.5: terminate the SERVER session — backend /auth/logout revokes the
+    // presented refresh token and clears httpOnly ms_access/ms_refresh + the
+    // ms_session marker. Best-effort: a failed backend call must NOT block logout,
+    // so local cleanup always runs afterward.
+    await authApi.logout().catch(() => undefined)
+    removeLegacyCustomerCookies()
     qc.removeQueries({ queryKey: qk.me })
+    qc.setQueryData(qk.me, null)
   }, [qc])
 
   const adminLogin = useCallback(
