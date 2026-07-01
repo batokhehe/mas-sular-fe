@@ -177,6 +177,11 @@ function OnboardingInner() {
 
   const onSubmit = async (data: AddressFormData) => {
     try {
+      // ── TEMP RCA instrumentation — remove after verification ───────────────
+      console.debug('[RCA] me.addresses BEFORE create  :', qc.getQueryData<User>(qk.me)?.addresses?.length,
+        '| addresses cache:', (qc.getQueryData(qk.addresses) as unknown[] | undefined)?.length)
+      // ───────────────────────────────────────────────────────────────────────
+
       // Real address creation (POST /users/me/addresses). The hook invalidates
       // qk.me + qk.addresses; the backend sets isOnboarded=true on this call.
       await createAddress.mutateAsync({
@@ -190,9 +195,18 @@ function OnboardingInner() {
         isDefault: true,
       })
 
+      // ── TEMP RCA instrumentation — remove after verification ───────────────
+      console.debug('[RCA] me.addresses AFTER mutate+invalidate:', qc.getQueryData<User>(qk.me)?.addresses?.length)
+      // ───────────────────────────────────────────────────────────────────────
+
       // Reflect isOnboarded=true synchronously BEFORE navigating so no stale
       // qk.me read can bounce the user back into onboarding.
       qc.setQueryData<User>(qk.me, (current) => (current ? { ...current, isOnboarded: true } : current))
+
+      // ── TEMP RCA instrumentation — remove after verification ───────────────
+      console.debug('[RCA] me.addresses AFTER setQueryData :', qc.getQueryData<User>(qk.me)?.addresses?.length,
+        '| addresses cache:', (qc.getQueryData(qk.addresses) as unknown[] | undefined)?.length)
+      // ───────────────────────────────────────────────────────────────────────
 
       router.replace(safeRedirect(redirect))
     } catch {
