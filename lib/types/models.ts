@@ -37,6 +37,12 @@ export interface User {
   createdAt: string
 }
 
+export interface AddressRegionRef {
+  id: string
+  code: string
+  name: string
+}
+
 export interface Address {
   id: string
   userId: string
@@ -48,6 +54,17 @@ export interface Address {
   latitude: string
   longitude: string
   isDefault: boolean
+  // Indonesian administrative hierarchy (nullable — legacy addresses omit these).
+  addressDetail?: string | null
+  provinceId?: string | null
+  cityId?: string | null
+  districtId?: string | null
+  villageId?: string | null
+  postalCode?: string | null
+  province?: AddressRegionRef | null
+  city?: (AddressRegionRef & { type: 'CITY' | 'REGENCY' }) | null
+  district?: AddressRegionRef | null
+  village?: (AddressRegionRef & { postalCode: string | null }) | null
 }
 
 export interface Product {
@@ -122,6 +139,15 @@ export interface CheckoutItem {
 export interface ShippingQuote {
   shipping_cost: number
   estimated_days: string
+}
+
+/** A selectable shipping service returned by /checkout/shipping-options. */
+export interface ShippingOption {
+  provider: string
+  service: string
+  serviceName: string
+  estimatedDays: string
+  shippingCost: number
 }
 
 export interface VoucherPreview {

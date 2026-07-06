@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useForm, Controller } from 'react-hook-form'
@@ -24,12 +24,16 @@ import {
 } from '@/components/ui/select'
 import { useMe } from '@/lib/query/hooks/use-me'
 import { useCheckout } from '@/lib/query/hooks/use-checkout'
+import { useCoverageCheck } from '@/lib/query/hooks/use-delivery-coverage'
+import { useShippingOptions } from '@/lib/query/hooks/use-shipping-options'
 import { useCartStore, cartSubtotal } from '@/lib/stores/cart-store'
 import { useLastOrderStore } from '@/lib/stores/last-order-store'
 import { ApiError } from '@/lib/api/client'
 import { formatIDR } from '@/lib/utils/format'
+import { formatAddressLine } from '@/lib/address/format-address'
 import { cn } from '@/lib/utils'
 import type { CreateOrderInput } from '@/lib/api/orders.api'
+import type { ShippingOption } from '@/lib/types/models'
 
 const schema = z.object({
   address_id: z.string().min(1, 'Select a delivery address'),
@@ -64,6 +68,7 @@ export default function CheckoutPage() {
     handleSubmit,
     setValue,
     getValues,
+    watch,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -72,6 +77,36 @@ export default function CheckoutPage() {
 
   const addresses = me?.addresses ?? []
   const subtotal = cartSubtotal(lines)
+  const checkoutItems = useMemo(() => lines.map((l) => ({ product_id: l.productId, qty: l.qty })), [lines])
+
+  // 1) Delivery coverage gate for the selected address (DELIVERY / PICKUP_ONLY / DISABLED).
+  const selectedAddressId = watch('address_id')
+  const selectedAddress = addresses.find((a) => a.id === selectedAddressId)
+  const coverageQuery = useCoverageCheck(selectedAddress)
+  const coverage = coverageQuery.data
+  const coverageBlocked = coverage?.coverageType === 'DISABLED'
+  const coveragePickupOnly = coverage?.coverageType === 'PICKUP_ONLY'
+  const deliverable = !!selectedAddress && !coverageBlocked && !coveragePickupOnly
+
+  // 2) When deliverable, fetch shipping quotes from all providers and let the
+  //    customer pick one (coverage no longer sets the fee — the provider does).
+  const shippingQuery = useShippingOptions(selectedAddressId, checkoutItems, deliverable)
+  const shippingOptions = shippingQuery.data ?? []
+  const [selectedShipping, setSelectedShipping] = useState<ShippingOption | null>(null)
+
+  // Reset the selection when the address changes; auto-pick the cheapest option once loaded.
+  useEffect(() => {
+    setSelectedShipping(null)
+  }, [selectedAddressId])
+  useEffect(() => {
+    if (!selectedShipping && shippingOptions.length > 0) {
+      const cheapest = [...shippingOptions].sort((a, b) => a.shippingCost - b.shippingCost)[0]
+      setSelectedShipping(cheapest)
+    }
+  }, [shippingOptions, selectedShipping])
+
+  const deliveryFee = selectedShipping?.shippingCost ?? 0
+  const canPlaceOrder = deliverable && !!selectedShipping
 
   // Preselect the default (or only) address once it loads; don't override a later
   // manual choice.
@@ -84,12 +119,16 @@ export default function CheckoutPage() {
 
   const onSubmit = (values: FormValues) => {
     setConflict(null)
+    if (!selectedShipping) return
     const input: CreateOrderInput = {
       address_id: values.address_id,
-      courier: values.courier,
+      // courier kept for backward compatibility; provider+service drive the quote.
+      courier: (selectedShipping.provider as 'paxel' | 'jne') ?? values.courier,
+      shipping_provider: selectedShipping.provider,
+      shipping_service: selectedShipping.service,
       payment_method: values.payment_method,
       voucher_code: values.voucher_code || undefined,
-      items: lines.map((l) => ({ product_id: l.productId, qty: l.qty })),
+      items: checkoutItems,
     }
     checkout.mutate(
       { input, idempotencyKey: idempotencyKey.current },
@@ -175,23 +214,58 @@ export default function CheckoutPage() {
                   <Controller
                     control={control}
                     name="address_id"
-                    render={({ field }) => (
-                      <Select value={field.value} onValueChange={field.onChange}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select an address" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {addresses.map((a) => (
-                            <SelectItem key={a.id} value={a.id}>
-                              {a.label} — {a.recipientName}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
+                    render={({ field }) => {
+                      const selected = addresses.find((a) => a.id === field.value)
+                      return (
+                        <div className="space-y-2">
+                          <Select value={field.value} onValueChange={field.onChange}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select an address" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {addresses.map((a) => (
+                                <SelectItem key={a.id} value={a.id}>
+                                  {a.label} — {a.recipientName}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {selected ? (
+                            <div className="rounded-md bg-muted/50 p-3 text-sm">
+                              <p className="font-medium">
+                                {selected.recipientName} · {selected.phone}
+                              </p>
+                              <p className="mt-0.5 text-muted-foreground">{formatAddressLine(selected)}</p>
+                            </div>
+                          ) : null}
+                        </div>
+                      )
+                    }}
                   />
                 )}
                 {errors.address_id ? <p className="text-sm text-destructive">{errors.address_id.message}</p> : null}
+
+                {/* Delivery coverage status for the selected address */}
+                {selectedAddress && coverageQuery.isFetching ? (
+                  <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="size-4 animate-spin" /> Checking delivery coverage…
+                  </p>
+                ) : null}
+                {coverageBlocked ? (
+                  <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+                    <AlertCircle className="mt-0.5 size-4" />
+                    <span>Sorry, we do not currently deliver to your location.</span>
+                  </div>
+                ) : coveragePickupOnly ? (
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+                    <AlertCircle className="mt-0.5 size-4" />
+                    <span>This area is only available for Pickup.</span>
+                  </div>
+                ) : deliverable ? (
+                  <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800">
+                    <p className="font-medium">Delivery available to this area.</p>
+                  </div>
+                ) : null}
               </Card>
 
               {/* Order items (real cart lines) */}
@@ -218,25 +292,50 @@ export default function CheckoutPage() {
                 </ul>
               </Card>
 
-              {/* Courier + payment */}
+              {/* Shipping service + payment */}
               <Card className="space-y-4 p-4">
                 <div className="space-y-2">
                   <Label>Shipping method</Label>
-                  <Controller
-                    control={control}
-                    name="courier"
-                    render={({ field }) => (
-                      <Select value={field.value} onValueChange={field.onChange}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="jne">JNE (Regular)</SelectItem>
-                          <SelectItem value="paxel">Paxel (Same day)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    )}
-                  />
+                  {!selectedAddress ? (
+                    <p className="text-sm text-muted-foreground">Select a delivery address first.</p>
+                  ) : coverageBlocked ? (
+                    <p className="text-sm text-muted-foreground">Delivery is unavailable in this area.</p>
+                  ) : coveragePickupOnly ? (
+                    <p className="text-sm text-muted-foreground">Only pickup is available in this area.</p>
+                  ) : shippingQuery.isFetching ? (
+                    <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="size-4 animate-spin" /> Loading shipping options…
+                    </p>
+                  ) : shippingQuery.isError ? (
+                    <p className="text-sm text-destructive">Unable to load shipping options for this address.</p>
+                  ) : shippingOptions.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No shipping services available.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {shippingOptions.map((opt) => {
+                        const active =
+                          selectedShipping?.provider === opt.provider &&
+                          selectedShipping?.service === opt.service
+                        return (
+                          <button
+                            type="button"
+                            key={`${opt.provider}-${opt.service}`}
+                            onClick={() => setSelectedShipping(opt)}
+                            className={cn(
+                              'flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition-colors',
+                              active ? 'border-primary bg-primary/5' : 'hover:border-primary/50',
+                            )}
+                          >
+                            <div>
+                              <p className="text-sm font-medium">{opt.serviceName}</p>
+                              <p className="text-xs text-muted-foreground">{opt.estimatedDays}</p>
+                            </div>
+                            <span className="text-sm font-semibold">{formatIDR(opt.shippingCost)}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -287,9 +386,27 @@ export default function CheckoutPage() {
                   <span className="text-muted-foreground">Subtotal ({lines.length} items)</span>
                   <span className="font-medium">{formatIDR(subtotal)}</span>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Shipping and discounts are calculated by the server on order creation.
-                </p>
+                {selectedShipping ? (
+                  <>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">
+                        Delivery fee ({selectedShipping.serviceName})
+                      </span>
+                      <span className="font-medium">{formatIDR(deliveryFee)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm font-semibold">
+                      <span>Grand total</span>
+                      <span>{formatIDR(subtotal + deliveryFee)}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Voucher discounts (if any) are applied by the server on order creation.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Select a delivery address and shipping service to see the total.
+                  </p>
+                )}
                 <Separator />
 
                 {conflict ? (
@@ -303,11 +420,20 @@ export default function CheckoutPage() {
                   </div>
                 ) : null}
 
-                <Button type="submit" size="lg" className="w-full rounded-full" disabled={checkout.isPending}>
+                <Button
+                  type="submit"
+                  size="lg"
+                  className="w-full rounded-full"
+                  disabled={checkout.isPending || !canPlaceOrder}
+                >
                   {checkout.isPending ? (
                     <>
                       <Loader2 className="mr-2 size-4 animate-spin" /> Placing order…
                     </>
+                  ) : coverageBlocked ? (
+                    'Delivery unavailable in this area'
+                  ) : coveragePickupOnly ? (
+                    'Pickup only in this area'
                   ) : (
                     <>
                       Place order

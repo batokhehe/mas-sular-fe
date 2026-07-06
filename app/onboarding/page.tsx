@@ -18,12 +18,23 @@ import { useAuth } from '@/lib/auth/auth-context'
 import { useCreateAddress } from '@/lib/query/hooks/use-addresses'
 import { qk } from '@/lib/query/keys'
 import type { User } from '@/lib/types/models'
+import { RegionFields } from '@/components/address/region-fields'
+import {
+  partsFromGoogleComponents,
+  resolveRegionFromGeocode,
+  type RegionValue,
+} from '@/lib/address/region-value'
 
 const addressSchema = z.object({
   recipientName: z.string().min(2, 'Nama penerima minimal 2 karakter'),
   phone: z.string().min(10, 'Nomor telepon tidak valid').max(15),
   fullAddress: z.string().min(10, 'Alamat lengkap minimal 10 karakter'),
   notes: z.string().optional(),
+  provinceId: z.string().min(1, 'Provinsi wajib dipilih'),
+  cityId: z.string().min(1, 'Kota/Kabupaten wajib dipilih'),
+  districtId: z.string().min(1, 'Kecamatan wajib dipilih'),
+  villageId: z.string().min(1, 'Kelurahan/Desa wajib dipilih'),
+  postalCode: z.string().regex(/^\d{5}$/, 'Kode pos terisi otomatis dari kelurahan'),
 })
 
 type AddressFormData = z.infer<typeof addressSchema>
@@ -56,6 +67,7 @@ function OnboardingInner() {
   const [isMapReady, setIsMapReady] = useState(false)
   const [isGeocoding, setIsGeocoding] = useState(false)
   const [isLocating, setIsLocating] = useState(false)
+  const [region, setRegion] = useState<RegionValue>({})
   const mapRef = useRef<HTMLDivElement | null>(null)
   const mapInstanceRef = useRef<any>(null)
   const markerRef = useRef<any>(null)
@@ -66,28 +78,60 @@ function OnboardingInner() {
     handleSubmit,
     formState: { errors },
     setValue,
+    clearErrors,
   } = useForm<AddressFormData>({
     resolver: zodResolver(addressSchema),
     defaultValues: {
       recipientName: user?.name || '',
+      provinceId: '',
+      cityId: '',
+      districtId: '',
+      villageId: '',
+      postalCode: '',
     },
   })
 
-  const reverseGeocodeLocation = useCallback((location: LatLng) => {
-    if (!geocoderRef.current) return
+  // Push a chain-select selection into RHF (used by both manual selection and the
+  // reverse-geocode auto-fill).
+  const applyRegion = useCallback(
+    (next: RegionValue) => {
+      setRegion(next)
+      setValue('provinceId', next.provinceId ?? '', { shouldValidate: false })
+      setValue('cityId', next.cityId ?? '', { shouldValidate: false })
+      setValue('districtId', next.districtId ?? '', { shouldValidate: false })
+      setValue('villageId', next.villageId ?? '', { shouldValidate: false })
+      setValue('postalCode', next.postalCode ?? '', { shouldValidate: false })
+      clearErrors(['provinceId', 'cityId', 'districtId', 'villageId', 'postalCode'])
+    },
+    [setValue, clearErrors],
+  )
 
-    setIsGeocoding(true)
-    geocoderRef.current.geocode({ location }, (results: any[], status: string) => {
-      setIsGeocoding(false)
+  const reverseGeocodeLocation = useCallback(
+    (location: LatLng) => {
+      if (!geocoderRef.current) return
 
-      if (status === 'OK' && results?.[0]?.formatted_address) {
-        setValue('fullAddress', results[0].formatted_address, { shouldValidate: true })
-        return
-      }
+      setIsGeocoding(true)
+      geocoderRef.current.geocode({ location }, (results: any[], status: string) => {
+        if (status === 'OK' && results?.[0]?.formatted_address) {
+          setValue('fullAddress', results[0].formatted_address, { shouldValidate: true })
+          // Best-effort: resolve Google's component names → master-table ids so the
+          // chain-select and postal code auto-fill without manual selection.
+          const parts = partsFromGoogleComponents(results[0].address_components ?? [])
+          resolveRegionFromGeocode(parts)
+            .then((resolved) => {
+              if (resolved.provinceId) applyRegion(resolved)
+            })
+            .catch(() => undefined)
+            .finally(() => setIsGeocoding(false))
+          return
+        }
 
-      toast.error('Alamat dari lokasi ini tidak ditemukan')
-    })
-  }, [setValue])
+        setIsGeocoding(false)
+        toast.error('Alamat dari lokasi ini tidak ditemukan')
+      })
+    },
+    [setValue, applyRegion],
+  )
 
   const selectMapLocation = useCallback((location: LatLng, shouldReverseGeocode = true) => {
     setMapLocation(location)
@@ -189,10 +233,16 @@ function OnboardingInner() {
         recipientName: data.recipientName,
         phone: data.phone,
         fullAddress: data.fullAddress,
+        addressDetail: data.fullAddress,
         notes: data.notes,
         latitude: mapLocation?.lat ?? DEFAULT_LOCATION.lat,
         longitude: mapLocation?.lng ?? DEFAULT_LOCATION.lng,
         isDefault: true,
+        provinceId: data.provinceId,
+        cityId: data.cityId,
+        districtId: data.districtId,
+        villageId: data.villageId,
+        postalCode: data.postalCode,
       })
 
       // ── TEMP RCA instrumentation — remove after verification ───────────────
@@ -335,11 +385,30 @@ function OnboardingInner() {
               {errors.phone && <p className="text-sm text-destructive">{errors.phone.message}</p>}
             </div>
 
+            {/* Region hidden inputs (values driven by RegionFields via applyRegion). */}
+            <input type="hidden" {...register('provinceId')} />
+            <input type="hidden" {...register('cityId')} />
+            <input type="hidden" {...register('districtId')} />
+            <input type="hidden" {...register('villageId')} />
+            <input type="hidden" {...register('postalCode')} />
+
+            <RegionFields
+              value={region}
+              onChange={applyRegion}
+              errors={{
+                provinceId: errors.provinceId?.message,
+                cityId: errors.cityId?.message,
+                districtId: errors.districtId?.message,
+                villageId: errors.villageId?.message,
+                postalCode: errors.postalCode?.message,
+              }}
+            />
+
             <div className="space-y-2">
-              <Label htmlFor="fullAddress">Alamat Lengkap</Label>
+              <Label htmlFor="fullAddress">Alamat Lengkap (jalan, no. rumah, RT/RW)</Label>
               <Textarea
                 id="fullAddress"
-                placeholder="Nama jalan, nomor rumah, RT/RW, kelurahan, kecamatan, kota"
+                placeholder="Nama jalan, nomor rumah, RT/RW"
                 rows={3}
                 {...register('fullAddress')}
               />
