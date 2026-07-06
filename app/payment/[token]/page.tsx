@@ -49,9 +49,17 @@ export default function PaymentUploadPage() {
               <span className="font-semibold">{data.orderNumber}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Amount</span>
+              <span className="text-muted-foreground">
+                {data.uniqueCode != null ? 'Transfer exactly' : 'Amount'}
+              </span>
               <span className="font-semibold">{formatIDR(data.amount)}</span>
             </div>
+            {data.uniqueCode != null ? (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Unique code</span>
+                <span className="font-semibold">{data.uniqueCode}</span>
+              </div>
+            ) : null}
             <div className="flex justify-between">
               <span className="text-muted-foreground">Method</span>
               <span className="font-semibold">{data.method}</span>
@@ -63,6 +71,11 @@ export default function PaymentUploadPage() {
               </div>
             ) : null}
           </div>
+          {data.uniqueCode != null ? (
+            <p className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
+              Please transfer the exact amount including the unique code to help us verify your payment faster.
+            </p>
+          ) : null}
           <UploadReceipt
             mode="token"
             reference={token as string}

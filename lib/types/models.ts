@@ -168,6 +168,8 @@ export interface CheckoutSummary {
 export interface UploadPage {
   orderNumber: string
   amount: number
+  /** Manual BANK_TRANSFER unique code folded into `amount`; null for QRIS/legacy. */
+  uniqueCode?: number | null
   method: PaymentMethod
   bankName?: string | null
   status: PaymentStatus
@@ -190,6 +192,8 @@ export interface Payment {
   method: PaymentMethod
   status: PaymentStatus
   amount: number
+  /** Manual BANK_TRANSFER unique code folded into `amount`; null for QRIS/COD/legacy. */
+  uniqueCode?: number | null
   manualReceiptUrl?: string | null
   manualBankName?: string | null
   manualAccountName?: string | null

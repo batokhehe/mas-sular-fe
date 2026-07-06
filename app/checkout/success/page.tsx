@@ -48,7 +48,26 @@ export default function CheckoutSuccessPage() {
         <Card className="space-y-3 p-5">
           <Row label="Order number" value={order.orderNumber} />
           <Row label="Payment method" value={order.paymentMethod} />
-          <Row label="Total" value={formatIDR(order.totalPrice)} />
+          {order.payment?.uniqueCode != null ? (
+            <>
+              <Row label="Subtotal" value={formatIDR(order.subtotal)} />
+              <Row label="Shipping" value={formatIDR(order.deliveryFee)} />
+              {order.voucherDiscountAmount > 0 ? (
+                <Row label="Discount" value={`- ${formatIDR(order.voucherDiscountAmount)}`} />
+              ) : null}
+              {/* Business total = Order.totalPrice (revenue, excludes the unique code). */}
+              <Row label="Business total" value={formatIDR(order.totalPrice)} />
+              <Row label="Unique code" value={String(order.payment.uniqueCode)} />
+              <Separator />
+              {/* Transfer exactly = Payment.amount (business total + unique code). */}
+              <Row label="Transfer exactly" value={formatIDR(order.payment.amount)} />
+              <p className="text-xs text-muted-foreground">
+                Please transfer the exact amount including the unique code to help us verify your payment faster.
+              </p>
+            </>
+          ) : (
+            <Row label="Total" value={formatIDR(order.totalPrice)} />
+          )}
           <Separator />
           {needsReceipt ? (
             <div className="space-y-3">
