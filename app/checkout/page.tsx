@@ -24,13 +24,15 @@ import {
 } from '@/components/ui/select'
 import { useMe } from '@/lib/query/hooks/use-me'
 import { useCheckout } from '@/lib/query/hooks/use-checkout'
+import { useCheckoutSummary } from '@/lib/query/hooks/use-checkout-summary'
 import { useCoverageCheck } from '@/lib/query/hooks/use-delivery-coverage'
 import { useShippingOptions } from '@/lib/query/hooks/use-shipping-options'
-import { useCartStore, cartSubtotal } from '@/lib/stores/cart-store'
+import { useCartStore } from '@/lib/stores/cart-store'
 import { useLastOrderStore } from '@/lib/stores/last-order-store'
 import { ApiError } from '@/lib/api/client'
 import { formatIDR } from '@/lib/utils/format'
 import { formatAddressLine } from '@/lib/address/format-address'
+import { checkoutSummaryRows } from '@/lib/checkout/summary'
 import { cn } from '@/lib/utils'
 import type { CreateOrderInput } from '@/lib/api/orders.api'
 import type { ShippingOption } from '@/lib/types/models'
@@ -76,7 +78,6 @@ export default function CheckoutPage() {
   })
 
   const addresses = me?.addresses ?? []
-  const subtotal = cartSubtotal(lines)
   const checkoutItems = useMemo(() => lines.map((l) => ({ product_id: l.productId, qty: l.qty })), [lines])
 
   // 1) Delivery coverage gate for the selected address (DELIVERY / PICKUP_ONLY / DISABLED).
@@ -105,8 +106,28 @@ export default function CheckoutPage() {
     }
   }, [shippingOptions, selectedShipping])
 
-  const deliveryFee = selectedShipping?.shippingCost ?? 0
   const canPlaceOrder = deliverable && !!selectedShipping
+
+  // Voucher is debounced so the (provider-hitting) summary endpoint is not called
+  // on every keystroke; the discount always comes back from the backend summary.
+  const voucherCodeRaw = watch('voucher_code')
+  const [debouncedVoucher, setDebouncedVoucher] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedVoucher((voucherCodeRaw ?? '').trim()), 500)
+    return () => clearTimeout(t)
+  }, [voucherCodeRaw])
+
+  // Server-authoritative money: subtotal / shipping / discount / grand total all
+  // come from the backend. The frontend NEVER recalculates them.
+  const summaryQuery = useCheckoutSummary({
+    addressId: selectedAddressId,
+    provider: selectedShipping?.provider,
+    service: selectedShipping?.service,
+    voucherCode: debouncedVoucher,
+    items: checkoutItems,
+    enabled: canPlaceOrder,
+  })
+  const summaryRows = summaryQuery.data ? checkoutSummaryRows(summaryQuery.data) : []
 
   // Preselect the default (or only) address once it loads; don't override a later
   // manual choice.
@@ -382,30 +403,37 @@ export default function CheckoutPage() {
 
               <Card className="space-y-3 p-4">
                 <h2 className="font-semibold">Order summary</h2>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Subtotal ({lines.length} items)</span>
-                  <span className="font-medium">{formatIDR(subtotal)}</span>
-                </div>
-                {selectedShipping ? (
-                  <>
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">
-                        Delivery fee ({selectedShipping.serviceName})
-                      </span>
-                      <span className="font-medium">{formatIDR(deliveryFee)}</span>
-                    </div>
-                    <div className="flex items-center justify-between text-sm font-semibold">
-                      <span>Grand total</span>
-                      <span>{formatIDR(subtotal + deliveryFee)}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Voucher discounts (if any) are applied by the server on order creation.
-                    </p>
-                  </>
-                ) : (
+                {/* Every amount below is rendered verbatim from the backend
+                    /checkout/summary response — the client performs no money math. */}
+                {!canPlaceOrder ? (
                   <p className="text-xs text-muted-foreground">
                     Select a delivery address and shipping service to see the total.
                   </p>
+                ) : summaryQuery.isLoading ? (
+                  <div className="space-y-2" aria-busy="true">
+                    {[0, 1, 2].map((i) => (
+                      <div key={i} className="h-4 w-full animate-pulse rounded bg-muted" />
+                    ))}
+                  </div>
+                ) : summaryQuery.isError ? (
+                  <p className="text-xs text-destructive">
+                    {(summaryQuery.error as Error)?.message ?? 'Unable to load the order total.'}
+                  </p>
+                ) : (
+                  summaryRows.map((row) => (
+                    <div
+                      key={row.key}
+                      className={cn(
+                        'flex items-center justify-between text-sm',
+                        row.key === 'grand_total' && 'font-semibold',
+                      )}
+                    >
+                      <span className={row.key === 'grand_total' ? '' : 'text-muted-foreground'}>{row.label}</span>
+                      <span className={row.key === 'grand_total' ? '' : 'font-medium'}>
+                        {row.key === 'discount' ? `- ${formatIDR(Math.abs(row.value))}` : formatIDR(row.value)}
+                      </span>
+                    </div>
+                  ))
                 )}
                 <Separator />
 

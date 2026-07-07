@@ -5,10 +5,11 @@ import { useQuery } from '@tanstack/react-query'
 import { paymentsApi } from '@/lib/api/payments.api'
 import { qk } from '@/lib/query/keys'
 import { UploadReceipt } from '@/components/storefront/upload-receipt'
+import { PaymentBreakdown } from '@/components/storefront/payment-breakdown'
 import { ErrorState } from '@/components/common/error-state'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { formatIDR } from '@/lib/utils/format'
+import { paymentBreakdownFromUpload } from '@/lib/checkout/summary'
 
 export default function PaymentUploadPage() {
   const params = useParams<{ token: string }>()
@@ -49,18 +50,6 @@ export default function PaymentUploadPage() {
               <span className="font-semibold">{data.orderNumber}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">
-                {data.uniqueCode != null ? 'Transfer exactly' : 'Amount'}
-              </span>
-              <span className="font-semibold">{formatIDR(data.amount)}</span>
-            </div>
-            {data.uniqueCode != null ? (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Unique code</span>
-                <span className="font-semibold">{data.uniqueCode}</span>
-              </div>
-            ) : null}
-            <div className="flex justify-between">
               <span className="text-muted-foreground">Method</span>
               <span className="font-semibold">{data.method}</span>
             </div>
@@ -71,11 +60,10 @@ export default function PaymentUploadPage() {
               </div>
             ) : null}
           </div>
-          {data.uniqueCode != null ? (
-            <p className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
-              Please transfer the exact amount including the unique code to help us verify your payment faster.
-            </p>
-          ) : null}
+
+          {/* Business Total / Unique Payment Code / Transfer Exactly — backend values only. */}
+          <PaymentBreakdown {...paymentBreakdownFromUpload(data)} />
+
           <UploadReceipt
             mode="token"
             reference={token as string}

@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { formatIDR } from '@/lib/utils/format'
+import { paymentBreakdownFromOrder } from '@/lib/checkout/summary'
+import { PaymentBreakdown } from '@/components/storefront/payment-breakdown'
 import { useLastOrderStore } from '@/lib/stores/last-order-store'
 
 const NEEDS_RECEIPT = new Set(['BANK_TRANSFER', 'QRIS'])
@@ -48,23 +50,11 @@ export default function CheckoutSuccessPage() {
         <Card className="space-y-3 p-5">
           <Row label="Order number" value={order.orderNumber} />
           <Row label="Payment method" value={order.paymentMethod} />
-          {order.payment?.uniqueCode != null ? (
-            <>
-              <Row label="Subtotal" value={formatIDR(order.subtotal)} />
-              <Row label="Shipping" value={formatIDR(order.deliveryFee)} />
-              {order.voucherDiscountAmount > 0 ? (
-                <Row label="Discount" value={`- ${formatIDR(order.voucherDiscountAmount)}`} />
-              ) : null}
-              {/* Business total = Order.totalPrice (revenue, excludes the unique code). */}
-              <Row label="Business total" value={formatIDR(order.totalPrice)} />
-              <Row label="Unique code" value={String(order.payment.uniqueCode)} />
-              <Separator />
-              {/* Transfer exactly = Payment.amount (business total + unique code). */}
-              <Row label="Transfer exactly" value={formatIDR(order.payment.amount)} />
-              <p className="text-xs text-muted-foreground">
-                Please transfer the exact amount including the unique code to help us verify your payment faster.
-              </p>
-            </>
+          {order.paymentMethod === 'BANK_TRANSFER' ? (
+            // Manual transfer: show the full breakdown (backend values only). The
+            // unique-code row hides itself when the code is null (same value shown
+            // for Business Total and Transfer Exactly).
+            <PaymentBreakdown {...paymentBreakdownFromOrder(order)} />
           ) : (
             <Row label="Total" value={formatIDR(order.totalPrice)} />
           )}

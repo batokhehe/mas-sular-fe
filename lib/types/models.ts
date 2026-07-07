@@ -168,6 +168,8 @@ export interface CheckoutSummary {
 export interface UploadPage {
   orderNumber: string
   amount: number
+  /** Business revenue (Order.totalPrice); equals `amount` when there is no code. */
+  businessTotal?: number | null
   /** Manual BANK_TRANSFER unique code folded into `amount`; null for QRIS/legacy. */
   uniqueCode?: number | null
   method: PaymentMethod
