@@ -15,6 +15,13 @@ export interface CreateOrderInput {
   shipping_provider?: string
   shipping_service?: string
   payment_method?: PaymentMethod
+  /**
+   * Gateway channel code from `GET /payments/channels` (QRIS, GOPAY, BCA_VA, …).
+   * Only meaningful when `payment_method` is GATEWAY; the backend ignores it
+   * otherwise. Declared here because checkout already sends it and the backend DTO
+   * already accepts it — the type was simply missing (found in Phase 5I).
+   */
+  payment_channel?: string
   voucher_code?: string
   items: CheckoutItem[]
 }

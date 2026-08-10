@@ -22,6 +22,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { useQuery } from '@tanstack/react-query'
+import { paymentsApi } from '@/lib/api/payments.api'
+import { badgesFor, groupChannels } from '@/lib/payments/channel-view'
 import { useMe } from '@/lib/query/hooks/use-me'
 import { useCheckout } from '@/lib/query/hooks/use-checkout'
 import { useCheckoutSummary } from '@/lib/query/hooks/use-checkout-summary'
@@ -40,19 +43,28 @@ import type { ShippingOption } from '@/lib/types/models'
 const schema = z.object({
   address_id: z.string().min(1, 'Select a delivery address'),
   courier: z.enum(['paxel', 'jne']),
-  payment_method: z.enum(['COD', 'BANK_TRANSFER', 'QRIS']),
+  // The selector works in CHANNEL codes from GET /payments/channels only.
+  payment_channel: z.string().min(1, 'Select a payment method'),
   voucher_code: z.string().optional(),
 })
 type FormValues = z.infer<typeof schema>
 
-// Visual config only — values are the exact payment_method enum the schema/payload use.
-const PAYMENT_METHODS = [
-  { value: 'BANK_TRANSFER', name: 'Bank transfer', description: 'Manual transfer', icon: Banknote },
-  { value: 'QRIS', name: 'QRIS', description: 'Scan to pay', icon: CreditCard },
-  { value: 'COD', name: 'Cash on delivery', description: 'Pay when it arrives', icon: Wallet },
-] as const
 
 export default function CheckoutPage() {
+  // Payment options come from the API — the selector hardcodes nothing.
+  const channelsQuery = useQuery({
+    queryKey: ['payment-channels'],
+    queryFn: () => paymentsApi.channels(),
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+
+  // Payment options are EXCLUSIVELY what GET /payments/channels returns — the
+  // selector injects nothing of its own (Phase 4A removed the synthetic COD entry).
+  const channelSections = useMemo(
+    () => groupChannels(channelsQuery.data?.channels ?? []),
+    [channelsQuery.data],
+  )
   const router = useRouter()
   const { data: me, isLoading: meLoading } = useMe()
   const lines = useCartStore((s) => s.lines)
@@ -74,7 +86,7 @@ export default function CheckoutPage() {
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { courier: 'jne', payment_method: 'BANK_TRANSFER', voucher_code: '' },
+    defaultValues: { courier: 'jne', payment_channel: 'MANUAL_TRANSFER', voucher_code: '' },
   })
 
   const addresses = me?.addresses ?? []
@@ -138,6 +150,12 @@ export default function CheckoutPage() {
     }
   }, [addresses, getValues, setValue])
 
+  const selectedChannelCode = watch('payment_channel')
+  const selectedChannel = useMemo(
+    () => channelSections.flatMap((s) => s.channels).find((c) => c.code === selectedChannelCode),
+    [channelSections, selectedChannelCode],
+  )
+
   const onSubmit = (values: FormValues) => {
     setConflict(null)
     if (!selectedShipping) return
@@ -147,7 +165,9 @@ export default function CheckoutPage() {
       courier: (selectedShipping.provider as 'paxel' | 'jne') ?? values.courier,
       shipping_provider: selectedShipping.provider,
       shipping_service: selectedShipping.service,
-      payment_method: values.payment_method,
+      payment_method: (selectedChannel?.method ?? 'BANK_TRANSFER') as CreateOrderInput['payment_method'],
+      // Only meaningful for GATEWAY; the backend ignores it otherwise.
+      payment_channel: selectedChannel?.method === 'GATEWAY' ? selectedChannel.code : undefined,
       voucher_code: values.voucher_code || undefined,
       items: checkoutItems,
     }
@@ -157,6 +177,13 @@ export default function CheckoutPage() {
         onSuccess: (order) => {
           setLastOrder(order)
           clearCart()
+          // A gateway order carries its normalized instructions; send the customer
+          // straight to the payment page. Everything else keeps the existing route.
+          const gateway = order as unknown as { paymentInstruction?: unknown; payment?: { id?: string } }
+          if (gateway.paymentInstruction && gateway.payment?.id) {
+            router.push(`/payment/gateway/${gateway.payment.id}`)
+            return
+          }
           router.push('/checkout/success')
         },
         onError: (err) => {
@@ -359,37 +386,65 @@ export default function CheckoutPage() {
                   )}
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Payment method</Label>
-                  <Controller
-                    control={control}
-                    name="payment_method"
-                    render={({ field }) => (
-                      <RadioGroup value={field.value} onValueChange={field.onChange} className="space-y-2">
-                        {PAYMENT_METHODS.map((m) => {
-                          const Icon = m.icon
-                          const active = field.value === m.value
-                          return (
-                            <Label
-                              key={m.value}
-                              htmlFor={`pm-${m.value}`}
-                              className={cn(
-                                'flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition-colors',
-                                active ? 'border-primary bg-primary/5' : 'hover:border-primary/50',
-                              )}
-                            >
-                              <RadioGroupItem value={m.value} id={`pm-${m.value}`} />
-                              <Icon className="size-5 text-muted-foreground" />
-                              <div className="flex-1">
-                                <p className="text-sm font-medium">{m.name}</p>
-                                <p className="text-xs text-muted-foreground">{m.description}</p>
-                              </div>
-                            </Label>
-                          )
-                        })}
-                      </RadioGroup>
-                    )}
-                  />
+                <div className="space-y-3">
+                  <Label>Metode pembayaran</Label>
+                  {channelsQuery.isLoading ? (
+                    <div className="space-y-2">
+                      {[0, 1, 2].map((i) => (
+                        <div key={i} className="h-14 animate-pulse rounded-xl bg-muted" />
+                      ))}
+                    </div>
+                  ) : (
+                    <Controller
+                      control={control}
+                      name="payment_channel"
+                      render={({ field }) => (
+                        <RadioGroup value={field.value} onValueChange={field.onChange} className="space-y-4">
+                          {channelSections.map((section) => (
+                            <div key={section.title} className="space-y-2">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                {section.title}
+                              </p>
+                              {section.channels.map((channel) => {
+                                const active = field.value === channel.code
+                                return (
+                                  <Label
+                                    key={channel.code}
+                                    htmlFor={`pm-${channel.code}`}
+                                    className={cn(
+                                      'flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition-colors',
+                                      active ? 'border-primary bg-primary/5' : 'hover:border-primary/50',
+                                    )}
+                                  >
+                                    <RadioGroupItem value={channel.code} id={`pm-${channel.code}`} />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <p className="text-sm font-medium">{channel.label}</p>
+                                        {badgesFor(channel).map((badge) => (
+                                          <span
+                                            key={badge}
+                                            className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary"
+                                          >
+                                            {badge}
+                                          </span>
+                                        ))}
+                                      </div>
+                                      {channel.description && (
+                                        <p className="text-xs text-muted-foreground">{channel.description}</p>
+                                      )}
+                                    </div>
+                                  </Label>
+                                )
+                              })}
+                            </div>
+                          ))}
+                        </RadioGroup>
+                      )}
+                    />
+                  )}
+                  {errors.payment_channel && (
+                    <p className="text-xs text-destructive">{errors.payment_channel.message}</p>
+                  )}
                 </div>
               </Card>
             </div>
