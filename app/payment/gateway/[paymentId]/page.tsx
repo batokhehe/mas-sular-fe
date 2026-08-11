@@ -1,15 +1,20 @@
 'use client'
 
-import { use, useState } from 'react'
+import { use, useCallback, useState } from 'react'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
-import { Check, Copy, Download, ExternalLink, Loader2 } from 'lucide-react'
+import { Check, CheckCircle2, Clock, Copy, Download, ExternalLink, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { PaymentCountdown } from '@/components/payment/payment-countdown'
 import { paymentsApi } from '@/lib/api/payments.api'
 import type { PaymentInstruction } from '@/lib/payments/gateway-types'
+import {
+  PAYMENT_POLL_INTERVAL_MS,
+  paymentPageState,
+  shouldPollPayment,
+} from '@/lib/payments/resume'
 import { formatIDR } from '@/lib/utils/format'
 
 /** Copy-to-clipboard button with inline confirmation. */
@@ -138,18 +143,64 @@ function InstructionView({ instruction, expired }: { instruction: PaymentInstruc
   }
 }
 
+/** Terminal screens — one per non-payable outcome. */
+function ResultCard({
+  icon,
+  tone,
+  title,
+  description,
+}: {
+  icon: typeof CheckCircle2
+  tone: string
+  title: string
+  description: string
+}) {
+  const Icon = icon
+  return (
+    <Card className="space-y-3 p-6 text-center">
+      <Icon className={`mx-auto size-10 ${tone}`} />
+      <p className="font-medium">{title}</p>
+      <p className="text-sm text-muted-foreground">{description}</p>
+      <Button asChild variant="outline" className="rounded-full">
+        <Link href="/orders">Lihat Pesanan</Link>
+      </Button>
+    </Card>
+  )
+}
+
 export default function GatewayPaymentPage({ params }: { params: Promise<{ paymentId: string }> }) {
   const { paymentId } = use(params)
-  const [expired, setExpired] = useState(false)
+  const [countdownDone, setCountdownDone] = useState(false)
 
-  // Read-only: rebuilds the stored attempt. Refreshing never re-charges.
+  // Read-only: rebuilds the stored attempt. Refreshing — and polling — never
+  // re-charges, because the endpoint only reads the ledger.
   const query = useQuery({
     queryKey: ['payment-instructions', paymentId],
     queryFn: () => paymentsApi.instructions(paymentId),
     retry: false,
+    // Poll OUR OWN backend while the charge is open, so a webhook settlement
+    // reaches the screen without a manual reload. Midtrans is never contacted
+    // from the browser. The timer stops as soon as the payment is no longer
+    // payable, and react-query clears it on unmount / when the query goes
+    // inactive — so a backgrounded tab does not poll forever.
+    refetchInterval: (q) =>
+      q.state.data && shouldPollPayment(paymentPageState(q.state.data))
+        ? PAYMENT_POLL_INTERVAL_MS
+        : false,
+    refetchIntervalInBackground: false,
   })
 
+  // The countdown is presentation only; the SERVER decides whether the attempt is
+  // still payable. When the local clock runs out we just ask again, and the
+  // response flips the page to the expired screen.
+  const { refetch } = query
+  const onExpire = useCallback(() => {
+    setCountdownDone(true)
+    void refetch()
+  }, [refetch])
+
   const gateway = query.data?.gateway ?? null
+  const state = query.data ? paymentPageState(query.data) : null
 
   return (
     <main className="container max-w-lg space-y-4 px-4 py-8">
@@ -157,6 +208,20 @@ export default function GatewayPaymentPage({ params }: { params: Promise<{ payme
         <div className="flex min-h-[50vh] items-center justify-center">
           <Loader2 className="size-6 animate-spin text-muted-foreground" />
         </div>
+      ) : state === 'PAID' ? (
+        <ResultCard
+          icon={CheckCircle2}
+          tone="text-green-600"
+          title="Pembayaran berhasil"
+          description="Terima kasih. Pembayaran Anda sudah kami terima dan pesanan sedang diproses."
+        />
+      ) : state === 'EXPIRED' ? (
+        <ResultCard
+          icon={Clock}
+          tone="text-destructive"
+          title="Waktu pembayaran habis"
+          description="Batas waktu pembayaran ini sudah lewat. Pesanan Anda tetap tersimpan — buka daftar pesanan untuk langkah selanjutnya."
+        />
       ) : query.isError || !gateway ? (
         <Card className="space-y-3 p-6 text-center">
           <p className="font-medium">Instruksi pembayaran tidak tersedia</p>
@@ -174,10 +239,10 @@ export default function GatewayPaymentPage({ params }: { params: Promise<{ payme
             <p className="mt-1 text-sm text-muted-foreground">{gateway.paymentInstruction.description}</p>
           </div>
 
-          <PaymentCountdown expiryAt={gateway.expiryAt} onExpire={() => setExpired(true)} />
+          <PaymentCountdown expiryAt={gateway.expiryAt} onExpire={onExpire} />
 
           <Card className="p-4">
-            <InstructionView instruction={gateway.paymentInstruction} expired={expired} />
+            <InstructionView instruction={gateway.paymentInstruction} expired={countdownDone} />
           </Card>
 
           <Button asChild variant="outline" className="w-full rounded-full">

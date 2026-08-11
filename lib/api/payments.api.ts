@@ -1,7 +1,7 @@
 import { api } from './client'
 import type { Payment, UploadPage } from '@/lib/types/models'
 import type { PublicPaymentChannel } from '@/lib/payments/channel-view'
-import type { GatewayPayment } from '@/lib/payments/gateway-types'
+import type { PaymentInstructionsResponse } from '@/lib/payments/gateway-types'
 
 export interface ReceiptBody {
   receiptUrl: string
@@ -23,9 +23,10 @@ export const paymentsApi = {
   channels: () => api.get<{ channels: PublicPaymentChannel[] }>('/payments/channels'),
 
   /**
-   * Rebuild an open gateway attempt (payment page load/refresh). Read-only on the
-   * backend: it reads the stored attempt and never re-charges the provider.
+   * Rebuild an open gateway attempt (payment page load/refresh, or "Bayar
+   * Sekarang" from the order list). Read-only on the backend: it reads the stored
+   * attempt and never re-charges the provider, so this is also safe to poll.
    */
   instructions: (paymentId: string) =>
-    api.get<{ gateway: GatewayPayment | null }>(`/payments/${paymentId}/instructions`, 'customer'),
+    api.get<PaymentInstructionsResponse>(`/payments/${paymentId}/instructions`, 'customer'),
 }
