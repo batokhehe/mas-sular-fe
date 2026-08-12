@@ -203,6 +203,12 @@ export interface Payment {
   firstReminderAt?: string | null
   secondReminderAt?: string | null
   createdAt: string
+  /**
+   * Latest gateway attempt, summarised by the order-list endpoint. Null for
+   * manual transfer and for a gateway payment that was never initiated. Carries
+   * the deadline ONLY — no QR payload, VA number, provider id or provider name.
+   */
+  gateway?: { expiryAt: string | null; status: string } | null
   // Included by the admin listPayments endpoint.
   order?: {
     id: string

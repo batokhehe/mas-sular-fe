@@ -8,13 +8,24 @@ import {
   shouldPollPayment,
 } from './resume.ts'
 
+/** Deterministic clock — no sleeps, no real time. */
+const NOW = Date.parse('2026-08-12T08:40:00.000Z')
+const MINUTE = 60_000
+const live = (over: Record<string, unknown> = {}) => ({
+  id: 'p1',
+  method: 'GATEWAY',
+  status: 'PENDING',
+  gateway: { expiryAt: new Date(NOW + 5 * MINUTE).toISOString() },
+  ...over,
+})
+
 test('only a PENDING gateway payment offers "Bayar Sekarang"', () => {
-  assert.equal(canResumeGatewayPayment({ id: 'p1', method: 'GATEWAY', status: 'PENDING' }), true)
+  assert.equal(canResumeGatewayPayment(live(), NOW), true)
 
   // Settled or dead payments must never re-open a payable QR.
   for (const status of ['PAID', 'FAILED', 'EXPIRED', 'REFUNDED', 'WAITING_VERIFICATION']) {
     assert.equal(
-      canResumeGatewayPayment({ id: 'p1', method: 'GATEWAY', status }),
+      canResumeGatewayPayment(live({ status }), NOW),
       false,
       `${status} must not be resumable`,
     )
@@ -23,14 +34,55 @@ test('only a PENDING gateway payment offers "Bayar Sekarang"', () => {
 
 test('manual methods keep the receipt flow and get no resume button', () => {
   // BANK_TRANSFER / QRIS have no gateway attempt to replay.
-  assert.equal(canResumeGatewayPayment({ id: 'p1', method: 'BANK_TRANSFER', status: 'PENDING' }), false)
-  assert.equal(canResumeGatewayPayment({ id: 'p1', method: 'QRIS', status: 'PENDING' }), false)
-  assert.equal(canResumeGatewayPayment({ id: 'p1', method: 'COD', status: 'PENDING' }), false)
+  assert.equal(canResumeGatewayPayment(live({ method: 'BANK_TRANSFER', gateway: null }), NOW), false)
+  assert.equal(canResumeGatewayPayment(live({ method: 'QRIS', gateway: null }), NOW), false)
+  assert.equal(canResumeGatewayPayment(live({ method: 'COD', gateway: null }), NOW), false)
 })
 
 test('an absent payment is not resumable', () => {
   assert.equal(canResumeGatewayPayment(null), false)
   assert.equal(canResumeGatewayPayment(undefined), false)
+})
+
+// ------------------------------------------------- expiry-aware gating (5J.8) --
+
+test('a PENDING attempt still inside its window is resumable', () => {
+  assert.equal(canResumeGatewayPayment(live(), NOW), true)
+})
+
+test('a PENDING attempt past its window is NOT resumable', () => {
+  // Payment.status is still PENDING here — the provider expire notification has
+  // not arrived yet. Without this check the button advertises a dead QR.
+  const expired = live({ gateway: { expiryAt: new Date(NOW - MINUTE).toISOString() } })
+  assert.equal(canResumeGatewayPayment(expired, NOW), false)
+})
+
+test('the exact expiry instant counts as expired', () => {
+  const boundary = live({ gateway: { expiryAt: new Date(NOW).toISOString() } })
+  assert.equal(canResumeGatewayPayment(boundary, NOW), false)
+})
+
+test('a null deadline stays resumable — it mirrors the backend gate', () => {
+  // Backend: `attempt.expiryAt && attempt.expiryAt <= now`. A channel with no
+  // deadline is payable, so the button must agree with the page it links to.
+  assert.equal(canResumeGatewayPayment(live({ gateway: { expiryAt: null } }), NOW), true)
+})
+
+test('an unparseable deadline never blocks a customer from paying', () => {
+  assert.equal(canResumeGatewayPayment(live({ gateway: { expiryAt: 'not-a-date' } }), NOW), true)
+})
+
+test('a GATEWAY payment with no attempt at all is not resumable', () => {
+  // Charge never opened (checkout could not reach the provider): nothing to replay.
+  assert.equal(canResumeGatewayPayment(live({ gateway: null }), NOW), false)
+  assert.equal(canResumeGatewayPayment(live({ gateway: undefined }), NOW), false)
+})
+
+test('an expired attempt is hidden regardless of status, and settled ones stay hidden', () => {
+  for (const status of ['PAID', 'FAILED', 'EXPIRED', 'REFUNDED', 'WAITING_VERIFICATION']) {
+    const p = live({ status, gateway: { expiryAt: new Date(NOW - MINUTE).toISOString() } })
+    assert.equal(canResumeGatewayPayment(p, NOW), false)
+  }
 })
 
 test('resume navigates to the existing payment page by payment id', () => {

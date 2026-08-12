@@ -9,26 +9,45 @@
  * that replays the stored attempt; the only path that opens a charge is checkout.
  */
 
+import { isExpired } from './countdown.ts'
+
 /** The payment fields the order list already carries. */
 export interface ResumablePayment {
   id: string
   method: string
   status: string
+  /** Latest gateway attempt summary from the order list; absent for manual transfer. */
+  gateway?: { expiryAt: string | null } | null
 }
 
 /**
- * The one resumable combination: a gateway payment still awaiting the customer.
+ * The one resumable combination: a gateway payment still awaiting the customer,
+ * whose stored attempt has not passed its deadline.
  *
  * BANK_TRANSFER/QRIS keep the receipt-upload flow and must NOT get this button —
  * they have no gateway attempt to replay. Every settled or dead status is
  * excluded: re-opening a paid QR would invite a second, unreconciled payment.
  *
+ * The expiry check matters because `Payment.status` stays PENDING until the
+ * provider's expire notification arrives, which can lag by hours — without it the
+ * button advertises a QR that is already dead.
+ *
+ * Expiry semantics come from the canonical `isExpired`, so a null or unparseable
+ * deadline is NOT expired. That deliberately mirrors the backend gate
+ * (`attempt.expiryAt && attempt.expiryAt <= now`): a channel with no deadline
+ * stays payable, and the button must not disagree with the page it links to.
+ *
  * This is a convenience gate only. The backend re-checks both status and expiry
- * on every request and is the authority.
+ * on every request and remains the authority.
  */
-export function canResumeGatewayPayment(payment: ResumablePayment | null | undefined): boolean {
+export function canResumeGatewayPayment(
+  payment: ResumablePayment | null | undefined,
+  now: number = Date.now(),
+): boolean {
   if (!payment) return false
-  return payment.method === 'GATEWAY' && payment.status === 'PENDING'
+  if (payment.method !== 'GATEWAY' || payment.status !== 'PENDING') return false
+  if (!payment.gateway) return false // never initiated — nothing to resume
+  return !isExpired(payment.gateway.expiryAt, now)
 }
 
 /** The existing payment page, addressed by payment id. */
