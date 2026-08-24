@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { AlertCircle, Loader2, MapPin, Banknote, CreditCard, Wallet, ChevronRight } from 'lucide-react'
+import { AlertCircle, Loader2, MapPin, Banknote, CreditCard, Wallet, ChevronRight, Check } from 'lucide-react'
 import { StorefrontShell } from '@/components/storefront/shell'
 import { Empty } from '@/components/common/empty'
 import { Button } from '@/components/ui/button'
@@ -35,6 +35,8 @@ import { ApiError } from '@/lib/api/client'
 import { formatIDR } from '@/lib/utils/format'
 import { formatAddressLine } from '@/lib/address/format-address'
 import { checkoutSummaryRows } from '@/lib/checkout/summary'
+import { groupShippingOptions } from '@/lib/checkout/shipping-groups'
+import { ProviderLogo } from '@/components/checkout/provider-logo'
 import { cn } from '@/lib/utils'
 import type { CreateOrderInput } from '@/lib/api/orders.api'
 import type { ShippingOption } from '@/lib/types/models'
@@ -105,6 +107,8 @@ export default function CheckoutPage() {
   const shippingQuery = useShippingOptions(selectedAddressId, checkoutItems, deliverable)
   const shippingOptions = shippingQuery.data ?? []
   const [selectedShipping, setSelectedShipping] = useState<ShippingOption | null>(null)
+  // Presentation-only grouping; does not touch selection or the submit payload.
+  const shippingGroups = useMemo(() => groupShippingOptions(shippingOptions), [shippingOptions])
 
   // Reset the selection when the address changes; auto-pick the cheapest option once loaded.
   useEffect(() => {
@@ -333,29 +337,51 @@ export default function CheckoutPage() {
                   ) : shippingOptions.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No shipping services available.</p>
                   ) : (
-                    <div className="space-y-2">
-                      {shippingOptions.map((opt) => {
-                        const active =
-                          selectedShipping?.provider === opt.provider &&
-                          selectedShipping?.service === opt.service
-                        return (
-                          <button
-                            type="button"
-                            key={`${opt.provider}-${opt.service}`}
-                            onClick={() => setSelectedShipping(opt)}
-                            className={cn(
-                              'flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition-colors',
-                              active ? 'border-primary bg-primary/5' : 'hover:border-primary/50',
-                            )}
-                          >
-                            <div>
-                              <p className="text-sm font-medium">{opt.serviceName}</p>
-                              <p className="text-xs text-muted-foreground">{opt.estimatedDays}</p>
-                            </div>
-                            <span className="text-sm font-semibold">{formatIDR(opt.shippingCost)}</span>
-                          </button>
-                        )
-                      })}
+                    // Grouped by the backend's stable `provider` id — presentation
+                    // only; each button still selects the exact option object.
+                    <div className="space-y-4">
+                      {shippingGroups.map((group) => (
+                        <div key={group.provider} className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <ProviderLogo provider={group.provider} title={group.title} />
+                            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                              {group.title}
+                            </h3>
+                          </div>
+                          {group.options.map((opt) => {
+                            const active =
+                              selectedShipping?.provider === opt.provider &&
+                              selectedShipping?.service === opt.service
+                            return (
+                              <button
+                                type="button"
+                                key={`${opt.provider}-${opt.service}`}
+                                onClick={() => setSelectedShipping(opt)}
+                                aria-pressed={active}
+                                className={cn(
+                                  'flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition-colors',
+                                  active ? 'border-primary bg-primary/5' : 'hover:border-primary/50',
+                                )}
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium">{opt.serviceName}</p>
+                                  <p className="text-xs text-muted-foreground">{opt.estimatedDays}</p>
+                                </div>
+                                {/* Always rendered, only faded — keeps the price
+                                    aligned and gives the selected state a
+                                    non-colour cue. */}
+                                <span className="flex shrink-0 items-center gap-2">
+                                  <Check
+                                    aria-hidden="true"
+                                    className={cn('size-4 text-primary', active ? 'opacity-100' : 'opacity-0')}
+                                  />
+                                  <span className="text-sm font-semibold">{formatIDR(opt.shippingCost)}</span>
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
