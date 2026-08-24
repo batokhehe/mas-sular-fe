@@ -28,7 +28,6 @@ import { badgesFor, groupChannels } from '@/lib/payments/channel-view'
 import { useMe } from '@/lib/query/hooks/use-me'
 import { useCheckout } from '@/lib/query/hooks/use-checkout'
 import { useCheckoutSummary } from '@/lib/query/hooks/use-checkout-summary'
-import { useCoverageCheck } from '@/lib/query/hooks/use-delivery-coverage'
 import { useShippingOptions } from '@/lib/query/hooks/use-shipping-options'
 import { useCartStore } from '@/lib/stores/cart-store'
 import { useLastOrderStore } from '@/lib/stores/last-order-store'
@@ -92,17 +91,17 @@ export default function CheckoutPage() {
   const addresses = me?.addresses ?? []
   const checkoutItems = useMemo(() => lines.map((l) => ({ product_id: l.productId, qty: l.qty })), [lines])
 
-  // 1) Delivery coverage gate for the selected address (DELIVERY / PICKUP_ONLY / DISABLED).
+  // 1) Shipping availability is the courier's answer, not ours. DeliveryCoverage
+  //    is deactivated for this flow: it used to gate the quote request, so a
+  //    DISABLED / PICKUP_ONLY rule hid Paxel services from areas Paxel serves.
+  //    An address is quotable as soon as one is selected; whether anything can
+  //    actually ship there is decided by the options the provider returns.
   const selectedAddressId = watch('address_id')
   const selectedAddress = addresses.find((a) => a.id === selectedAddressId)
-  const coverageQuery = useCoverageCheck(selectedAddress)
-  const coverage = coverageQuery.data
-  const coverageBlocked = coverage?.coverageType === 'DISABLED'
-  const coveragePickupOnly = coverage?.coverageType === 'PICKUP_ONLY'
-  const deliverable = !!selectedAddress && !coverageBlocked && !coveragePickupOnly
+  const deliverable = !!selectedAddress
 
-  // 2) When deliverable, fetch shipping quotes from all providers and let the
-  //    customer pick one (coverage no longer sets the fee — the provider does).
+  // 2) Fetch shipping quotes from all providers and let the customer pick one
+  //    (the provider sets the fee).
   const shippingQuery = useShippingOptions(selectedAddressId, checkoutItems, deliverable)
   const shippingOptions = shippingQuery.data ?? []
   const [selectedShipping, setSelectedShipping] = useState<ShippingOption | null>(null)
@@ -293,27 +292,6 @@ export default function CheckoutPage() {
                 )}
                 {errors.address_id ? <p className="text-sm text-destructive">{errors.address_id.message}</p> : null}
 
-                {/* Delivery coverage status for the selected address */}
-                {selectedAddress && coverageQuery.isFetching ? (
-                  <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="size-4 animate-spin" /> Checking delivery coverage…
-                  </p>
-                ) : null}
-                {coverageBlocked ? (
-                  <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
-                    <AlertCircle className="mt-0.5 size-4" />
-                    <span>Sorry, we do not currently deliver to your location.</span>
-                  </div>
-                ) : coveragePickupOnly ? (
-                  <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-                    <AlertCircle className="mt-0.5 size-4" />
-                    <span>This area is only available for Pickup.</span>
-                  </div>
-                ) : deliverable ? (
-                  <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800">
-                    <p className="font-medium">Delivery available to this area.</p>
-                  </div>
-                ) : null}
               </Card>
 
               {/* Order items (real cart lines) */}
@@ -346,10 +324,6 @@ export default function CheckoutPage() {
                   <Label>Shipping method</Label>
                   {!selectedAddress ? (
                     <p className="text-sm text-muted-foreground">Select a delivery address first.</p>
-                  ) : coverageBlocked ? (
-                    <p className="text-sm text-muted-foreground">Delivery is unavailable in this area.</p>
-                  ) : coveragePickupOnly ? (
-                    <p className="text-sm text-muted-foreground">Only pickup is available in this area.</p>
                   ) : shippingQuery.isFetching ? (
                     <p className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Loader2 className="size-4 animate-spin" /> Loading shipping options…
@@ -513,10 +487,6 @@ export default function CheckoutPage() {
                     <>
                       <Loader2 className="mr-2 size-4 animate-spin" /> Placing order…
                     </>
-                  ) : coverageBlocked ? (
-                    'Delivery unavailable in this area'
-                  ) : coveragePickupOnly ? (
-                    'Pickup only in this area'
                   ) : (
                     <>
                       Place order
