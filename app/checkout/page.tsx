@@ -132,6 +132,12 @@ export default function CheckoutPage() {
     return () => clearTimeout(t)
   }, [voucherCodeRaw])
 
+  const selectedChannelCode = watch('payment_channel')
+  const selectedChannel = useMemo(
+    () => channelSections.flatMap((s) => s.channels).find((c) => c.code === selectedChannelCode),
+    [channelSections, selectedChannelCode],
+  )
+
   // Server-authoritative money: subtotal / shipping / discount / grand total all
   // come from the backend. The frontend NEVER recalculates them.
   const summaryQuery = useCheckoutSummary({
@@ -139,6 +145,8 @@ export default function CheckoutPage() {
     provider: selectedShipping?.provider,
     service: selectedShipping?.service,
     voucherCode: debouncedVoucher,
+    paymentMethod: selectedChannel?.method,
+    paymentChannel: selectedChannel?.method === 'GATEWAY' ? selectedChannel.code : undefined,
     items: checkoutItems,
     enabled: canPlaceOrder,
   })
@@ -152,12 +160,6 @@ export default function CheckoutPage() {
       setValue('address_id', preselect.id)
     }
   }, [addresses, getValues, setValue])
-
-  const selectedChannelCode = watch('payment_channel')
-  const selectedChannel = useMemo(
-    () => channelSections.flatMap((s) => s.channels).find((c) => c.code === selectedChannelCode),
-    [channelSections, selectedChannelCode],
-  )
 
   const onSubmit = (values: FormValues) => {
     setConflict(null)
